@@ -9,7 +9,6 @@ import re
 import urllib
 
 import flask
-import jinja2
 import jwcrypto
 import jwcrypto.jwk
 import jwcrypto.jws
@@ -76,7 +75,7 @@ def make_token_for(keypair, uri, method):
     return jwt.serialize()
 
 
-template = jinja2.Template("""
+_TEMPLATE = """
 <h2>Login status</h2>
 {% if web_id %}
   You are logged in as {{ web_id }}.
@@ -98,7 +97,7 @@ template = jinja2.Template("""
       name='resource'>
   <input type=submit value=Read>
 </form>
-""")
+"""
 
 
 def main(_):
@@ -180,7 +179,8 @@ def main(_):
         else:
             resource_content = None
 
-        return flask.Response(template.render(
+        return flask.Response(flask.render_template_string(
+            _TEMPLATE,
             web_id=web_id,
             resource_content=resource_content,
             resource=tested_url),
