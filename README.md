@@ -11,7 +11,9 @@ it.
 
 ## Running
 
-* Install [Bazel](https://bazel.build).
-* Run the app with: `bazel run :flask_solid_main`.
-  If you want to use a issuer other than https://solidcommunity.net/, pass:
-  `bazel run :flask_solid_main -- --issuer=https://...`
+- Run `python3 -m venv vev` to create a virtual environment (so you don't install dependencies globally)
+- Start the virtual environment, e.g. `. venv/bin/activate`
+- Install dependencies `pip install -r requirements.txt`
+
+
+Now you can start the application with `python solid_flask_main.py`. Append eg `--issuer https://login.inrupt.com/` to run it with a different issuer.
