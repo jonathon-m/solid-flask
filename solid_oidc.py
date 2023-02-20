@@ -14,6 +14,7 @@ import jwcrypto.jws
 import jwcrypto.jwt
 import requests
 import urllib.parse
+from uuid import uuid4
 from storage import KeyValueStore
 
 class SolidOidcClient:
@@ -64,9 +65,7 @@ class SolidOidcClient:
 
 
 def make_random_string():
-    x = base64.urlsafe_b64encode(os.urandom(40)).decode('utf-8')
-    x = re.sub('[^a-zA-Z0-9]+', '', x)
-    return x
+    return str(uuid4())
 
 
 def make_verifier_challenge():
