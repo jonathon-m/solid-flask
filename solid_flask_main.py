@@ -53,7 +53,7 @@ def register_client(provider_info):
             provider_info['registration_endpoint'],
             redirect_uris=[get_redirect_url()])
     logging.info("Registration response: %s", registration_response)
-    return registration_response['client_id']
+    return registration_response['client_id'], registration_response['client_secret']
 
 
 def make_token_for(keypair, uri, method):
@@ -106,7 +106,7 @@ def main(_):
     provider_info = requests.get(_ISSUER.value +
                                  ".well-known/openid-configuration").json()
     logging.info("Provider info: %s", provider_info)
-    client_id = register_client(provider_info)
+    client_id, client_secret = register_client(provider_info)
 
     flask_app = flask.Flask(__name__)
     flask_app.secret_key = 'notreallyverysecret123'
@@ -199,6 +199,7 @@ def main(_):
 
         # Exchange auth code for access token
         resp = requests.post(url=provider_info['token_endpoint'],
+                             auth=(client_id, client_secret),
                              data={
                                  "grant_type": "authorization_code",
                                  "client_id": client_id,
