@@ -18,7 +18,7 @@ class SolidAuthSession:
     def get_web_id(self) -> str:
         decoded_token = jwcrypto.jwt.JWT(jwt=self.access_token)
         payload = json.loads(decoded_token.token.objects['payload'])
-        return payload['sub']
+        return payload['webid']
 
     def get_auth_headers(self, url: str, method: str) -> dict:
         """returns a dict of authentication headers for a target url and http method"""
