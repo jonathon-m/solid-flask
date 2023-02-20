@@ -1,11 +1,6 @@
 # TODO(agentydragon): add logout
 
-import base64
-import datetime
-import hashlib
 import json
-import os
-import re
 import urllib
 
 import flask
@@ -15,8 +10,8 @@ import jwcrypto.jws
 import jwcrypto.jwt
 import requests
 from absl import app, flags, logging
-from oic.oic import Client as OicClient
-from oic.utils.authn.client import CLIENT_AUTHN_METHOD
+from solid_oidc import register_client, make_verifier_challenge, make_token_for, make_random_string, get_login_url, get_access_token
+from storage import MemStore
 
 _PORT = flags.DEFINE_integer('port', 3333, 'HTTP port to listen on')
 _ISSUER = flags.DEFINE_string('issuer', 'https://solidcommunity.net/',
@@ -27,52 +22,6 @@ _OID_CALLBACK_PATH = "/oauth/callback"
 
 def get_redirect_url():
     return f"http://localhost:{_PORT.value}{_OID_CALLBACK_PATH}"
-
-
-def make_random_string():
-    x = base64.urlsafe_b64encode(os.urandom(40)).decode('utf-8')
-    x = re.sub('[^a-zA-Z0-9]+', '', x)
-    return x
-
-
-def make_verifier_challenge():
-    code_verifier = make_random_string()
-
-    code_challenge = hashlib.sha256(code_verifier.encode('utf-8')).digest()
-    code_challenge = base64.urlsafe_b64encode(code_challenge).decode('utf-8')
-    code_challenge = code_challenge.replace('=', '')
-
-    return code_verifier, code_challenge
-
-
-def register_client(provider_info):
-    # Client registration.
-    # https://pyoidc.readthedocs.io/en/latest/examples/rp.html#client-registration
-    registration_response = OicClient(
-        client_authn_method=CLIENT_AUTHN_METHOD).register(
-            provider_info['registration_endpoint'],
-            redirect_uris=[get_redirect_url()])
-    logging.info("Registration response: %s", registration_response)
-    return registration_response['client_id'], registration_response['client_secret']
-
-
-def make_token_for(keypair, uri, method):
-    jwt = jwcrypto.jwt.JWT(header={
-        "typ":
-        "dpop+jwt",
-        "alg":
-        "ES256",
-        "jwk":
-        keypair.export(private_key=False, as_dict=True)
-    },
-                           claims={
-                               "jti": make_random_string(),
-                               "htm": method,
-                               "htu": uri,
-                               "iat": int(datetime.datetime.now().timestamp())
-                           })
-    jwt.make_signed_token(keypair)
-    return jwt.serialize()
 
 
 _TEMPLATE = """
@@ -106,13 +55,13 @@ def main(_):
     provider_info = requests.get(_ISSUER.value +
                                  ".well-known/openid-configuration").json()
     logging.info("Provider info: %s", provider_info)
-    client_id, client_secret = register_client(provider_info)
+    client_id, client_secret = register_client(provider_info, get_redirect_url())
 
     flask_app = flask.Flask(__name__)
     flask_app.secret_key = 'notreallyverysecret123'
 
     # keyed by state, contains {'key': {...}, 'code_verifier': ...}
-    STATE_STORAGE = {}
+    STATE_STORAGE = MemStore()
 
     @flask_app.route('/')
     def index():
@@ -146,30 +95,11 @@ def main(_):
                 code_verifier, code_challenge = make_verifier_challenge()
 
                 state = make_random_string()
-                assert state not in STATE_STORAGE
-                STATE_STORAGE[state] = {
-                    'code_verifier': code_verifier,
-                    'redirect_url': flask.request.url
-                }
+                assert not STATE_STORAGE.has(state)
+                STATE_STORAGE.set(f'{state}_code_verifier', code_verifier)
+                STATE_STORAGE.set(f'{state}_redirect_url', flask.request.url)
 
-                query = urllib.parse.urlencode({
-                    "code_challenge":
-                    code_challenge,
-                    "state":
-                    state,
-                    "response_type":
-                    "code",
-                    "redirect_uri":
-                    get_redirect_url(),
-                    "code_challenge_method":
-                    "S256",
-                    "client_id":
-                    client_id,
-                    # offline_access: also asks for refresh token
-                    "scope":
-                    "openid offline_access",
-                })
-                url = provider_info['authorization_endpoint'] + '?' + query
+                url = get_login_url(code_challenge, state, get_redirect_url(), client_id, provider_info['authorization_endpoint'])
                 return flask.redirect(url)
             elif resp.status_code != 200:
                 raise Exception(
@@ -190,47 +120,36 @@ def main(_):
     def oauth_callback():
         auth_code = flask.request.args['code']
         state = flask.request.args['state']
-        assert state in STATE_STORAGE, f"state {state} not in STATE_STORAGE?"
+        assert STATE_STORAGE.has(f'{state}_code_verifier')
 
         # Generate a key-pair.
         keypair = jwcrypto.jwk.JWK.generate(kty='EC', crv='P-256')
 
-        code_verifier = STATE_STORAGE[state].pop('code_verifier')
+        code_verifier = STATE_STORAGE.get(f'{state}_code_verifier')
+        STATE_STORAGE.remove(f'{state}_code_verifier')
 
-        # Exchange auth code for access token
-        resp = requests.post(url=provider_info['token_endpoint'],
-                             auth=(client_id, client_secret),
-                             data={
-                                 "grant_type": "authorization_code",
-                                 "client_id": client_id,
-                                 "redirect_uri": get_redirect_url(),
-                                 "code": auth_code,
-                                 "code_verifier": code_verifier,
-                             },
-                             headers={
-                                 'DPoP':
-                                 make_token_for(
-                                     keypair, provider_info['token_endpoint'],
-                                     'POST')
-                             },
-                             allow_redirects=False)
-        result = resp.json()
-        logging.info("%s", result)
+        access_token = get_access_token(
+            token_endpoint=provider_info['token_endpoint'],
+            client_id=client_id,
+            client_secret=client_secret,
+            redirect_uri=get_redirect_url(),
+            code=auth_code,
+            code_verifier=code_verifier,
+            key=keypair,
+        )
 
         flask.session['key'] = keypair.export()
-        flask.session['access_token'] = result['access_token']
+        flask.session['access_token'] = access_token
 
         decoded_access_token = jwcrypto.jwt.JWT()
-        decoded_access_token.deserialize(result['access_token'])
-        decoded_id_token = jwcrypto.jwt.JWT()
-        decoded_id_token.deserialize(result['id_token'])
+        decoded_access_token.deserialize(access_token)
         logging.info("access token: %s", decoded_access_token)
-        logging.info("id token: %s", decoded_id_token)
 
-        # TODO(agentydragon): at this point can probably drop STATE_STORAGE[state]
-        return flask.redirect(STATE_STORAGE[state].pop('redirect_url'))
+        redirect_url = STATE_STORAGE.get(f'{state}_redirect_url')
+        STATE_STORAGE.remove(f'{state}_redirect_url')
+        return flask.redirect(redirect_url)
 
-    flask_app.run(port=_PORT.value)
+    flask_app.run(port=_PORT.value, debug=True)
 
 
 if __name__ == '__main__':
