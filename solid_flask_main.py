@@ -46,7 +46,7 @@ _TEMPLATE = """
 
 def main(_):
     solid_oidc_client = SolidOidcClient(storage=MemStore())
-    solid_oidc_client.register_client(str(_ISSUER.value), get_redirect_url())
+    solid_oidc_client.register_client(str(_ISSUER.value), [get_redirect_url()])
 
     flask_app = flask.Flask(__name__)
     flask_app.secret_key = 'notreallyverysecret123'
@@ -70,7 +70,7 @@ def main(_):
             if resp.status_code == 401:
                 logging.info("Got 401 trying to access %s.", tested_url)
 
-                url = solid_oidc_client.initialize_login(flask.request.url, get_redirect_url())
+                url = solid_oidc_client.create_login_uri(flask.request.url, get_redirect_url())
                 return flask.redirect(url)
             elif resp.status_code != 200:
                 raise Exception(
@@ -93,14 +93,14 @@ def main(_):
         state = flask.request.args['state']
 
         session = solid_oidc_client.finish_login(
-            redirect_uri=get_redirect_url(),
             code=code,
             state=state,
+            callback_uri=get_redirect_url(),
         )
 
         flask.session['auth'] = session.serialize()
 
-        redirect_url = solid_oidc_client.get_redirect_url(state)
+        redirect_url = solid_oidc_client.get_application_redirect_uri(state)
         return flask.redirect(redirect_url)
 
     flask_app.run(port=_PORT.value, debug=True)

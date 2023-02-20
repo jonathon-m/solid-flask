@@ -5,7 +5,7 @@ import jwcrypto.jws
 import jwcrypto.jwt
 from uuid import uuid4
 
-def make_token_for(keypair, uri, method):
+def create_dpop_token(keypair, uri, method):
     jwt = jwcrypto.jwt.JWT(header={
         "typ":
         "dpop+jwt",

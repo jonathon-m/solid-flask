@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, List
 from oic.oic import Client as OicClient
 from oic.utils.authn.client import CLIENT_AUTHN_METHOD
 from oic.oauth2.message import ASConfigurationResponse
@@ -13,11 +13,12 @@ import requests
 import urllib.parse
 from uuid import uuid4
 
-from dpop_utils import make_token_for
+from dpop_utils import create_dpop_token
 from solid_auth_session import SolidAuthSession
 from storage import KeyValueStore
 
 class SolidOidcClient:
+    """Client to handle Solid-OIDC authentication. Create one per identity provider"""
     def __init__(self, storage: KeyValueStore) -> None:
         self.client = OicClient(client_authn_method=CLIENT_AUTHN_METHOD)
         self.storage = storage
@@ -25,21 +26,23 @@ class SolidOidcClient:
         self.client_id: Optional[str] = None
         self.client_secret: Optional[str] = None
 
-    def register_client(self, issuer: str, redirect_url: str):
+    def register_client(self, issuer: str, redirect_uris: List[str]):
+        """Register this client for a specific identity provider"""
         self.provider_info = self.client.provider_config(issuer)
         registration_response = self.client.register(
                 self.provider_info['registration_endpoint'],
-                redirect_uris=[redirect_url])
+                redirect_uris=redirect_uris)
         logging.info("Registration response: %s", registration_response)
         self.client_id = registration_response['client_id']
         self.client_secret = registration_response['client_secret']
 
-    def initialize_login(self, redirect_uri: str, callback_uri: str) -> str:
+    def create_login_uri(self, application_redirect_uri: str, callback_uri: str) -> str:
+        """Initializes internal parameters and configures an uri which should be visited by the user"""
         authorization_endpoint = self.provider_info['authorization_endpoint']
-        code_verifier, code_challenge = make_verifier_challenge()
+        code_verifier, code_challenge = create_verifier_challenge()
         state = str(uuid4())
         self.storage.set(f'{state}_code_verifier', code_verifier)
-        self.storage.set(f'{state}_redirect_url', redirect_uri)
+        self.storage.set(f'{state}_redirect_url', application_redirect_uri)
         args = {
             "code_challenge": code_challenge,
             "state": state,
@@ -51,13 +54,13 @@ class SolidOidcClient:
             # offline_access: also asks for refresh token
             "scope": "openid offline_access",
         }
-        url = f'{authorization_endpoint}?{urllib.parse.urlencode(args)}'
-        return url
+        return f'{authorization_endpoint}?{urllib.parse.urlencode(args)}'
 
-    def finish_login(self, redirect_uri: str, code: str, state: str) -> str:
+    def finish_login(self, code: str, state: str, callback_uri: str) -> str:
+        """Creates a authentication session with the parameters from the redirect"""
         key = jwcrypto.jwk.JWK.generate(kty='EC', crv='P-256')
 
-        access_token = self._get_access_token(redirect_uri, code, state, key)
+        access_token = self._get_access_token(callback_uri, code, state, key)
 
         return SolidAuthSession(access_token, key)
     
@@ -65,7 +68,7 @@ class SolidOidcClient:
         token_endpoint = self.provider_info['token_endpoint']
         code_verifier = self.storage.get(f'{state}_code_verifier')
 
-        res = requests.post(url=token_endpoint,
+        res = requests.post(token_endpoint,
             auth=(self.client_id, self.client_secret),
             data={
                 "grant_type": "authorization_code",
@@ -75,7 +78,7 @@ class SolidOidcClient:
                 "code_verifier": code_verifier,
             },
             headers={
-                'DPoP': make_token_for(key, token_endpoint, 'POST'),
+                'DPoP': create_dpop_token(key, token_endpoint, 'POST'),
             },
             allow_redirects=False)
 
@@ -85,12 +88,14 @@ class SolidOidcClient:
 
         return access_token
 
-    def get_redirect_url(self, state: str) -> str:
-        """Note: we never remove the redirect url from the storage"""
-        return self.storage.get(f'{state}_redirect_url')
+    def get_application_redirect_uri(self, state: str) -> str:
+        """Returns the uri the application should load after authentication was successful"""
+        url = self.storage.get(f'{state}_redirect_url')
+        self.storage.remove(f'{state}_redirect_url')
+        return url
 
 
-def make_verifier_challenge():
+def create_verifier_challenge():
     code_verifier = str(uuid4())
 
     code_challenge = hashlib.sha256(code_verifier.encode('utf-8')).digest()

@@ -6,7 +6,7 @@ import jwcrypto.jwk
 import jwcrypto.jws
 import jwcrypto.jwt
 
-from dpop_utils import make_token_for
+from dpop_utils import create_dpop_token
 
 class SolidAuthSession:
     """Session of one logged in account"""
@@ -23,7 +23,7 @@ class SolidAuthSession:
         """returns a dict of authentication headers for a target url and http method"""
         return {
             'Authorization': ('DPoP ' + self.access_token),
-            'DPoP': make_token_for(self.key, url, method)
+            'DPoP': create_dpop_token(self.key, url, method)
         }
     
     def serialize(self) -> str:
@@ -40,7 +40,7 @@ class SolidAuthSession:
         key = jwcrypto.jwk.JWK.from_json(obj['key'])
         return SolidAuthSession(access_token, key)
 
-def make_token_for(keypair, uri, method):
+def create_dpop_token(keypair, uri, method):
     jwt = jwcrypto.jwt.JWT(header={
         "typ":
         "dpop+jwt",
