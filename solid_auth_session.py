@@ -8,6 +8,7 @@ import jwcrypto.jwt
 
 from dpop_utils import create_dpop_token
 
+# TODO: handle token expiration + refreshing
 class SolidAuthSession:
     """Session of one logged in account"""
     def __init__(self, access_token: str, key: jwcrypto.jwk.JWK) -> None:

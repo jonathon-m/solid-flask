@@ -23,24 +23,30 @@ _TEMPLATE = """
 <h2>Login status</h2>
 {% if web_id %}
   You are logged in as {{ web_id }}.
-{% else %}
-  You are not logged in.
-{% endif %}
+  <form action=/logout method=POST>
+    <button type="submit">Logout</button>
+  </form>
 
-<h2>Resource content</h2>
-{% if resource %}
-  <pre>{{ resource_content }}</pre>
-{% else %}
-  Use the form below to read a resource.
-{% endif %}
-
-<form action=/ method=GET>
+  <h2>Fetch files</h2>
+  <form action=/ method=GET>
   <input
       value="{{ resource }}"
       placeholder='https://you.solidcommunity.net/private/...'
       name='resource'>
   <input type=submit value=Read>
-</form>
+  </form>
+
+  {% if resource %}
+  <h2>Resource content</h2>
+  <pre>{{ resource_content }}</pre>
+  {% endif %}
+
+{% else %}
+  You are not logged in.
+  <form action=/login method=POST>
+    <button type="submit">Login</button>
+  </form>
+{% endif %}
 """
 
 
@@ -55,7 +61,7 @@ def main(_):
     def index():
         tested_url = flask.request.args.get('resource', '')
 
-        if ('auth' in flask.session):
+        if 'auth' in flask.session:
             session = SolidAuthSession.deserialize(flask.session['auth'])
             headers = session.get_auth_headers(tested_url, 'GET')
             web_id = session.get_web_id()
@@ -64,19 +70,8 @@ def main(_):
             web_id = None
 
         if tested_url:
-            # Read file from Solid.
-            # TODO(agentydragon): handle token expiration, refreshes, etc.
-            resp = requests.get(url=tested_url, headers=headers)
-            if resp.status_code == 401:
-                logging.info("Got 401 trying to access %s.", tested_url)
-
-                url = solid_oidc_client.create_login_uri(flask.request.url, get_redirect_url())
-                return flask.redirect(url)
-            elif resp.status_code != 200:
-                raise Exception(
-                    f"Unexpected status code: {resp.status_code} {resp.text}")
-
-            resource_content = resp.text
+            res = requests.get(url=tested_url, headers=headers)
+            resource_content = res.text
         else:
             resource_content = None
 
@@ -86,6 +81,17 @@ def main(_):
             resource_content=resource_content,
             resource=tested_url),
                               mimetype='text/html')
+    
+    @flask_app.route('/login', methods=['POST'])
+    def login():
+        login_url = solid_oidc_client.create_login_uri('/', get_redirect_url())
+        return flask.redirect(login_url)
+    
+    @flask_app.route('/logout', methods=['POST'])
+    def logout():
+        flask.session.clear()
+        return flask.redirect('/')
+
 
     @flask_app.route(_OID_CALLBACK_PATH)
     def oauth_callback():
