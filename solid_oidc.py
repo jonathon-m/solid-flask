@@ -2,11 +2,9 @@ from typing import Optional
 from oic.oic import Client as OicClient
 from oic.utils.authn.client import CLIENT_AUTHN_METHOD
 from oic.oauth2.message import ASConfigurationResponse
-import datetime
 import base64
 import logging
 import hashlib
-import json
 import jwcrypto
 import jwcrypto.jwk
 import jwcrypto.jws
@@ -16,6 +14,7 @@ import urllib.parse
 from uuid import uuid4
 
 from dpop_utils import make_token_for
+from solid_auth_session import SolidAuthSession
 from storage import KeyValueStore
 
 class SolidOidcClient:
@@ -48,17 +47,43 @@ class SolidOidcClient:
             "redirect_uri": callback_uri,
             "code_challenge_method": "S256",
             "client_id": self.client_id,
+            # TODO: should this be an option?
             # offline_access: also asks for refresh token
             "scope": "openid offline_access",
         }
         url = f'{authorization_endpoint}?{urllib.parse.urlencode(args)}'
         return url
 
-    def get_access_token(self, redirect_uri: str, code: str, state: str, key: jwcrypto.jwk.JWK) -> str:
+    def finish_login(self, redirect_uri: str, code: str, state: str) -> str:
+        key = jwcrypto.jwk.JWK.generate(kty='EC', crv='P-256')
+
+        access_token = self._get_access_token(redirect_uri, code, state, key)
+
+        return SolidAuthSession(access_token, key)
+    
+    def _get_access_token(self, redirect_uri: str, code: str, state: str, key: jwcrypto.jwk.JWK) -> str:
         token_endpoint = self.provider_info['token_endpoint']
         code_verifier = self.storage.get(f'{state}_code_verifier')
+
+        res = requests.post(url=token_endpoint,
+            auth=(self.client_id, self.client_secret),
+            data={
+                "grant_type": "authorization_code",
+                "client_id": self.client_id,
+                "redirect_uri": redirect_uri,
+                "code": code,
+                "code_verifier": code_verifier,
+            },
+            headers={
+                'DPoP': make_token_for(key, token_endpoint, 'POST'),
+            },
+            allow_redirects=False)
+
+        assert res.ok, f'Could not get access token: {res}'
+        access_token = res.json()['access_token']
         self.storage.remove(f'{state}_code_verifier')
-        return get_access_token(token_endpoint, self.client_id, self.client_secret, redirect_uri, code, code_verifier, key)
+
+        return access_token
 
     def get_redirect_url(self, state: str) -> str:
         """Note: we never remove the redirect url from the storage"""
@@ -77,25 +102,3 @@ def make_verifier_challenge():
     code_challenge = code_challenge.replace('=', '')
 
     return code_verifier, code_challenge
-
-
-def get_access_token(token_endpoint: str, client_id: str, client_secret: str, redirect_uri: str, code: str, code_verifier: str, key: jwcrypto.jwk.JWK) -> str:
-    resp = requests.post(url=token_endpoint,
-                        auth=(client_id, client_secret),
-                        data={
-                            "grant_type": "authorization_code",
-                            "client_id": client_id,
-                            "redirect_uri": redirect_uri,
-                            "code": code,
-                            "code_verifier": code_verifier,
-                        },
-                        headers={
-                            'DPoP':
-                            make_token_for(
-                                key, token_endpoint,
-                                'POST')
-                        },
-                        allow_redirects=False)
-    result = resp.json()
-    logging.info("%s", result)
-    return result['access_token']

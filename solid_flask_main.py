@@ -1,13 +1,6 @@
 # TODO(agentydragon): add logout
 
-import json
-import urllib
-
 import flask
-import jwcrypto
-import jwcrypto.jwk
-import jwcrypto.jws
-import jwcrypto.jwt
 import requests
 from absl import app, flags, logging
 
@@ -96,20 +89,16 @@ def main(_):
 
     @flask_app.route(_OID_CALLBACK_PATH)
     def oauth_callback():
-        auth_code = flask.request.args['code']
+        code = flask.request.args['code']
         state = flask.request.args['state']
 
-        # Generate a key-pair.
-        keypair = jwcrypto.jwk.JWK.generate(kty='EC', crv='P-256')
-
-        access_token = solid_oidc_client.get_access_token(
+        session = solid_oidc_client.finish_login(
             redirect_uri=get_redirect_url(),
-            code=auth_code,
-            key=keypair,
+            code=code,
             state=state,
         )
 
-        flask.session['auth'] = SolidAuthSession(access_token, keypair).serialize()
+        flask.session['auth'] = session.serialize()
 
         redirect_url = solid_oidc_client.get_redirect_url(state)
         return flask.redirect(redirect_url)
