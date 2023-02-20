@@ -37,7 +37,7 @@ class SolidOidcClient:
     def initialize_login(self, redirect_uri: str, callback_uri: str) -> str:
         authorization_endpoint = self.provider_info['authorization_endpoint']
         code_verifier, code_challenge = make_verifier_challenge()
-        state = make_random_string()
+        state = str(uuid4())
         self.storage.set(f'{state}_code_verifier', code_verifier)
         self.storage.set(f'{state}_redirect_url', redirect_uri)
         args = {
@@ -90,12 +90,8 @@ class SolidOidcClient:
         return self.storage.get(f'{state}_redirect_url')
 
 
-def make_random_string():
-    return str(uuid4())
-
-
 def make_verifier_challenge():
-    code_verifier = make_random_string()
+    code_verifier = str(uuid4())
 
     code_challenge = hashlib.sha256(code_verifier.encode('utf-8')).digest()
     code_challenge = base64.urlsafe_b64encode(code_challenge).decode('utf-8')
