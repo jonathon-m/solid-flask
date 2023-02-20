@@ -1,3 +1,7 @@
+# About
+
+This is a fork of [solid-flask](https://gitlab.com/agentydragon/solid-flask/) by Rai. I've refactored the authentication logic to be more reusable.
+
 # solid-flask
 
 This is a simple Flask app that can authenticate against a Solid pod and read
@@ -14,6 +18,5 @@ it.
 - Run `python3 -m venv vev` to create a virtual environment (so you don't install dependencies globally)
 - Start the virtual environment, e.g. `. venv/bin/activate`
 - Install dependencies `pip install -r requirements.txt`
-
 
 Now you can start the application with `python solid_flask_main.py`. Append eg `--issuer https://login.inrupt.com/` to run it with a different issuer.
