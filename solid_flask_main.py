@@ -10,7 +10,7 @@ import jwcrypto.jws
 import jwcrypto.jwt
 import requests
 from absl import app, flags, logging
-from solid_oidc import SolidOidcClient, make_token_for
+from solid_oidc import SolidOidcClient, SolidAuthSession
 from storage import MemStore
 
 _PORT = flags.DEFINE_integer('port', 3333, 'HTTP port to listen on')
@@ -64,17 +64,10 @@ def main(_):
             logging.info("loading access token and key from session")
             keypair = jwcrypto.jwk.JWK.from_json(flask.session['key'])
             access_token = flask.session['access_token']
-            headers = {
-                'Authorization': ('DPoP ' + access_token),
-                'DPoP': make_token_for(keypair, tested_url, 'GET')
-            }
-            decoded_access_token = jwcrypto.jwt.JWT(jwt=access_token)
-            # TODO(agentydragon): should we also verify the payload against
-            # the signature it has?
-            web_id = json.loads(
-                decoded_access_token.token.objects['payload'])['sub']
-            # TODO(agentydragon): if we pull the webid from here, it needs
-            # further validation.
+ 
+            session = SolidAuthSession(access_token, keypair)
+            headers = session.get_auth_headers(tested_url, 'GET')
+            web_id = session.get_web_id()
         else:
             headers = {}
             web_id = None
@@ -120,10 +113,6 @@ def main(_):
 
         flask.session['key'] = keypair.export()
         flask.session['access_token'] = access_token
-
-        decoded_access_token = jwcrypto.jwt.JWT()
-        decoded_access_token.deserialize(access_token)
-        logging.info("access token: %s", decoded_access_token)
 
         redirect_url = solid_oidc_client.get_redirect_url(state)
         return flask.redirect(redirect_url)

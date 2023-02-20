@@ -6,8 +6,7 @@ import datetime
 import base64
 import logging
 import hashlib
-import os
-import re
+import json
 import jwcrypto
 import jwcrypto.jwk
 import jwcrypto.jws
@@ -63,6 +62,23 @@ class SolidOidcClient:
         """Note: we never remove the redirect url from the storage"""
         return self.storage.get(f'{state}_redirect_url')
 
+class SolidAuthSession:
+    """Session of one logged in account"""
+    def __init__(self, access_token: str, key: jwcrypto.jwk.JWK) -> None:
+        self.access_token = access_token
+        self.key = key
+
+    def get_web_id(self) -> str:
+        decoded_token = jwcrypto.jwt.JWT(jwt=self.access_token)
+        payload = json.loads(decoded_token.token.objects['payload'])
+        return payload['sub']
+
+    def get_auth_headers(self, url: str, method: str) -> dict:
+        """returns a dict of authentication headers for a target url and http method"""
+        return {
+            'Authorization': ('DPoP ' + self.access_token),
+            'DPoP': make_token_for(self.key, url, method)
+        }
 
 def make_random_string():
     return str(uuid4())
