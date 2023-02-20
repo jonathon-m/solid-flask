@@ -79,6 +79,20 @@ class SolidAuthSession:
             'Authorization': ('DPoP ' + self.access_token),
             'DPoP': make_token_for(self.key, url, method)
         }
+    
+    def serialize(self) -> str:
+        """return a string representation of this session"""
+        return json.dumps({
+            'access_token': self.access_token,
+            'key': self.key.export(),
+        })
+    
+    @staticmethod
+    def deserialize(serialization: str):
+        obj = json.loads(serialization)
+        access_token = obj['access_token']
+        key = jwcrypto.jwk.JWK.from_json(obj['key'])
+        return SolidAuthSession(access_token, key)
 
 def make_random_string():
     return str(uuid4())

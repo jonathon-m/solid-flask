@@ -60,12 +60,8 @@ def main(_):
     def index():
         tested_url = flask.request.args.get('resource', '')
 
-        if ('access_token' in flask.session) and ('key' in flask.session):
-            logging.info("loading access token and key from session")
-            keypair = jwcrypto.jwk.JWK.from_json(flask.session['key'])
-            access_token = flask.session['access_token']
- 
-            session = SolidAuthSession(access_token, keypair)
+        if ('auth' in flask.session):
+            session = SolidAuthSession.deserialize(flask.session['auth'])
             headers = session.get_auth_headers(tested_url, 'GET')
             web_id = session.get_web_id()
         else:
@@ -111,8 +107,7 @@ def main(_):
             state=state,
         )
 
-        flask.session['key'] = keypair.export()
-        flask.session['access_token'] = access_token
+        flask.session['auth'] = SolidAuthSession(access_token, keypair).serialize()
 
         redirect_url = solid_oidc_client.get_redirect_url(state)
         return flask.redirect(redirect_url)
