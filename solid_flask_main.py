@@ -10,7 +10,9 @@ import jwcrypto.jws
 import jwcrypto.jwt
 import requests
 from absl import app, flags, logging
-from solid_oidc import SolidOidcClient, SolidAuthSession
+
+from solid_oidc import SolidOidcClient
+from solid_auth_session import SolidAuthSession
 from storage import MemStore
 
 _PORT = flags.DEFINE_integer('port', 3333, 'HTTP port to listen on')
