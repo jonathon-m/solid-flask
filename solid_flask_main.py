@@ -10,7 +10,7 @@ import jwcrypto.jws
 import jwcrypto.jwt
 import requests
 from absl import app, flags, logging
-from solid_oidc import register_client, make_verifier_challenge, make_token_for, make_random_string, get_login_url, get_access_token
+from solid_oidc import SolidOidcClient, make_token_for
 from storage import MemStore
 
 _PORT = flags.DEFINE_integer('port', 3333, 'HTTP port to listen on')
@@ -50,18 +50,11 @@ _TEMPLATE = """
 
 
 def main(_):
-    # Provider info discovery.
-    # https://pyoidc.readthedocs.io/en/latest/examples/rp.html#provider-info-discovery
-    provider_info = requests.get(_ISSUER.value +
-                                 ".well-known/openid-configuration").json()
-    logging.info("Provider info: %s", provider_info)
-    client_id, client_secret = register_client(provider_info, get_redirect_url())
+    solid_oidc_client = SolidOidcClient(storage=MemStore())
+    solid_oidc_client.register_client(str(_ISSUER.value), get_redirect_url())
 
     flask_app = flask.Flask(__name__)
     flask_app.secret_key = 'notreallyverysecret123'
-
-    # keyed by state, contains {'key': {...}, 'code_verifier': ...}
-    STATE_STORAGE = MemStore()
 
     @flask_app.route('/')
     def index():
@@ -92,14 +85,8 @@ def main(_):
             resp = requests.get(url=tested_url, headers=headers)
             if resp.status_code == 401:
                 logging.info("Got 401 trying to access %s.", tested_url)
-                code_verifier, code_challenge = make_verifier_challenge()
 
-                state = make_random_string()
-                assert not STATE_STORAGE.has(state)
-                STATE_STORAGE.set(f'{state}_code_verifier', code_verifier)
-                STATE_STORAGE.set(f'{state}_redirect_url', flask.request.url)
-
-                url = get_login_url(code_challenge, state, get_redirect_url(), client_id, provider_info['authorization_endpoint'])
+                url = solid_oidc_client.initialize_login(flask.request.url, get_redirect_url())
                 return flask.redirect(url)
             elif resp.status_code != 200:
                 raise Exception(
@@ -120,22 +107,15 @@ def main(_):
     def oauth_callback():
         auth_code = flask.request.args['code']
         state = flask.request.args['state']
-        assert STATE_STORAGE.has(f'{state}_code_verifier')
 
         # Generate a key-pair.
         keypair = jwcrypto.jwk.JWK.generate(kty='EC', crv='P-256')
 
-        code_verifier = STATE_STORAGE.get(f'{state}_code_verifier')
-        STATE_STORAGE.remove(f'{state}_code_verifier')
-
-        access_token = get_access_token(
-            token_endpoint=provider_info['token_endpoint'],
-            client_id=client_id,
-            client_secret=client_secret,
+        access_token = solid_oidc_client.get_access_token(
             redirect_uri=get_redirect_url(),
             code=auth_code,
-            code_verifier=code_verifier,
             key=keypair,
+            state=state,
         )
 
         flask.session['key'] = keypair.export()
@@ -145,8 +125,7 @@ def main(_):
         decoded_access_token.deserialize(access_token)
         logging.info("access token: %s", decoded_access_token)
 
-        redirect_url = STATE_STORAGE.get(f'{state}_redirect_url')
-        STATE_STORAGE.remove(f'{state}_redirect_url')
+        redirect_url = solid_oidc_client.get_redirect_url(state)
         return flask.redirect(redirect_url)
 
     flask_app.run(port=_PORT.value, debug=True)

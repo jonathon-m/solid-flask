@@ -1,5 +1,7 @@
+from typing import Optional
 from oic.oic import Client as OicClient
 from oic.utils.authn.client import CLIENT_AUTHN_METHOD
+from oic.oauth2.message import ASConfigurationResponse
 import datetime
 import base64
 import logging
@@ -12,19 +14,54 @@ import jwcrypto.jws
 import jwcrypto.jwt
 import requests
 import urllib.parse
+from storage import KeyValueStore
 
-# TODO reusing a client expects to use the same OP
-# see NOTE at https://pyoidc.readthedocs.io/en/latest/examples/rp.html#client-registration
-client = OicClient(client_authn_method=CLIENT_AUTHN_METHOD)
+class SolidOidcClient:
+    def __init__(self, storage: KeyValueStore) -> None:
+        self.client = OicClient(client_authn_method=CLIENT_AUTHN_METHOD)
+        self.storage = storage
+        self.provider_info: Optional[ASConfigurationResponse] = None 
+        self.client_id: Optional[str] = None
+        self.client_secret: Optional[str] = None
 
-def register_client(provider_info, redirect_url: str):
-    # Client registration.
-    # https://pyoidc.readthedocs.io/en/latest/examples/rp.html#client-registration
-    registration_response = client.register(
-            provider_info['registration_endpoint'],
-            redirect_uris=[redirect_url])
-    logging.info("Registration response: %s", registration_response)
-    return registration_response['client_id'], registration_response['client_secret']
+    def register_client(self, issuer: str, redirect_url: str):
+        self.provider_info = self.client.provider_config(issuer)
+        registration_response = self.client.register(
+                self.provider_info['registration_endpoint'],
+                redirect_uris=[redirect_url])
+        logging.info("Registration response: %s", registration_response)
+        self.client_id = registration_response['client_id']
+        self.client_secret = registration_response['client_secret']
+
+    def initialize_login(self, redirect_uri: str, callback_uri: str) -> str:
+        authorization_endpoint = self.provider_info['authorization_endpoint']
+        code_verifier, code_challenge = make_verifier_challenge()
+        state = make_random_string()
+        self.storage.set(f'{state}_code_verifier', code_verifier)
+        self.storage.set(f'{state}_redirect_url', redirect_uri)
+        args = {
+            "code_challenge": code_challenge,
+            "state": state,
+            "response_type": "code",
+            "redirect_uri": callback_uri,
+            "code_challenge_method": "S256",
+            "client_id": self.client_id,
+            # offline_access: also asks for refresh token
+            "scope": "openid offline_access",
+        }
+        url = f'{authorization_endpoint}?{urllib.parse.urlencode(args)}'
+        return url
+
+    def get_access_token(self, redirect_uri: str, code: str, state: str, key: jwcrypto.jwk.JWK) -> str:
+        token_endpoint = self.provider_info['token_endpoint']
+        code_verifier = self.storage.get(f'{state}_code_verifier')
+        self.storage.remove(f'{state}_code_verifier')
+        return get_access_token(token_endpoint, self.client_id, self.client_secret, redirect_uri, code, code_verifier, key)
+
+    def get_redirect_url(self, state: str) -> str:
+        """Note: we never remove the redirect url from the storage"""
+        return self.storage.get(f'{state}_redirect_url')
+
 
 def make_random_string():
     x = base64.urlsafe_b64encode(os.urandom(40)).decode('utf-8')
@@ -60,19 +97,6 @@ def make_token_for(keypair, uri, method):
     jwt.make_signed_token(keypair)
     return jwt.serialize()
 
-def get_login_url(code_challenge: str, state: str, redirect_uri: str, client_id: str, authorization_endpoint: str) -> str:
-    args = {
-        "code_challenge": code_challenge,
-        "state": state,
-        "response_type": "code",
-        "redirect_uri": redirect_uri,
-        "code_challenge_method": "S256",
-        "client_id": client_id,
-        # offline_access: also asks for refresh token
-        "scope": "openid offline_access",
-    }
-    url = f'{authorization_endpoint}?{urllib.parse.urlencode(args)}'
-    return url
 
 def get_access_token(token_endpoint: str, client_id: str, client_secret: str, redirect_uri: str, code: str, code_verifier: str, key: jwcrypto.jwk.JWK) -> str:
     resp = requests.post(url=token_endpoint,
