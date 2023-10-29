@@ -4,7 +4,7 @@ A simple demo app to show how to use [solid_oidc_client](https://pypi.org/projec
 
 ## Running
 
-- Run `python3 -m venv vev` to create a virtual environment (so you don't install dependencies globally)
+- Run `python3 -m venv venv` to create a virtual environment (so you don't install dependencies globally)
 - Start the virtual environment, e.g. `. venv/bin/activate`
 - Install dependencies `pip install -r requirements.txt`
 
