@@ -1,6 +1,6 @@
 {
     "@context": "https://www.w3.org/ns/solid/oidc-context.jsonld",
-    "client_id": "https://github.com/jonathon-m/solid-flask/clientId.jsonld",
+    "client_id": "https://raw.githubusercontent.com/jonathon-m/solid-flask/main/clientId.jsonld",
     "redirect_uris": [
         "https://localhost:3333/",
         "https://localhost:3333/oauth/callback"
