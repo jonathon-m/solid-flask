@@ -14,5 +14,6 @@
     "response_types": [
         "code"
     ],
-    "scope": "openid webid offline_access"
+    "scope": "openid webid offline_access",
+    "client_uri": "https://localhost:3333/"
 }
